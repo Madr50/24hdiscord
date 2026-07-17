@@ -64,11 +64,8 @@ def keep_alive():
     t.start()
 
 # ============ إعداد البوت (Selfbot) ============
-intents = discord.Intents.default()
-intents.guilds = True
-intents.voice_states = True
-
-client = discord.Client(intents=intents)
+# الـ selfbot (حساب مستخدم) لا يستخدم Intents مثل الـ bot العادي
+client = discord.Client()
 
 RECONNECT_DELAY = 10
 MAX_RECONNECT_DELAY = 120
