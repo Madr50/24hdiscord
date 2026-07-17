@@ -21,15 +21,15 @@ SELF_MUTE = os.environ.get('SELF_MUTE', 'false').lower() == 'true'
 SELF_DEAF = os.environ.get('SELF_DEAF', 'false').lower() == 'true'
 
 if not DISCORD_TOKEN:
-    raise RuntimeError("DISCORD_TOKEN مفقود! أضفه بـ Environment Variables على Render.")
+    raise RuntimeError("DISCORD_TOKEN مفقود! أضفه في Environment Variables.")
 if not VOICE_CHANNEL_ID:
-    raise RuntimeError("VOICE_CHANNEL_ID مفقود! أضفه بـ Environment Variables على Render.")
+    raise RuntimeError("VOICE_CHANNEL_ID مفقود! أضفه في Environment Variables.")
 
 VOICE_CHANNEL_ID = int(VOICE_CHANNEL_ID)
 GUILD_ID = int(GUILD_ID) if GUILD_ID else None
 
 # ============ Flask Keep-Alive ============
-app = Flask('')
+flask_app = Flask('')
 bot_status = {
     "connected": False,
     "channel": None,
@@ -38,7 +38,7 @@ bot_status = {
     "guild": None
 }
 
-@app.route('/')
+@flask_app.route('/')
 def home():
     state = "متصل ✅" if bot_status["connected"] else "غير متصل ❌"
     return {
@@ -51,13 +51,13 @@ def home():
         "self_deaf": SELF_DEAF,
     }
 
-@app.route('/health')
+@flask_app.route('/health')
 def health():
     return {"status": "OK", "connected": bot_status["connected"]}, 200
 
 def run_web():
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port, use_reloader=False)
+    port = int(os.environ.get('PORT', 10000))
+    flask_app.run(host='0.0.0.0', port=port, use_reloader=False)
 
 def keep_alive():
     t = Thread(target=run_web, daemon=True)
@@ -82,14 +82,24 @@ async def join_voice_channel():
     while True:
         await asyncio.sleep(2)
 
-        channel = client.get_channel(VOICE_CHANNEL_ID)
+        try:
+            channel = client.get_channel(VOICE_CHANNEL_ID)
+        except Exception as e:
+            log.error(f"خطأ في جلب الروم: {e}")
+            await asyncio.sleep(delay)
+            continue
 
         if channel is None:
             log.error("لم يتم العثور على الروم الصوتي! تأكد من VOICE_CHANNEL_ID")
             await asyncio.sleep(delay)
             continue
 
-        existing = discord.utils.get(client.voice_clients, guild=channel.guild)
+        # تحقق من الاتصال الحالي
+        try:
+            existing = discord.utils.get(client.voice_clients, guild=channel.guild)
+        except Exception:
+            existing = None
+
         if existing and existing.is_connected():
             if existing.channel.id == channel.id:
                 bot_status["connected"] = True
@@ -99,7 +109,10 @@ async def join_voice_channel():
                 continue
             else:
                 log.info("موجود بروم مختلف، جاري قطع الاتصال...")
-                await existing.disconnect(force=True)
+                try:
+                    await existing.disconnect(force=True)
+                except Exception:
+                    pass
                 await asyncio.sleep(3)
 
         try:
@@ -128,7 +141,12 @@ async def join_voice_channel():
             bot_status["reconnects"] += 1
 
         except discord.errors.ClientException as e:
-            log.error(f"خطأ عميل: {e}")
+            log.error(f"خطأ عميل Discord: {e}")
+            bot_status["connected"] = False
+            await asyncio.sleep(delay)
+
+        except asyncio.TimeoutError:
+            log.error("⏱️ انتهى وقت الاتصال (Timeout)، إعادة المحاولة...")
             bot_status["connected"] = False
             await asyncio.sleep(delay)
 
@@ -152,7 +170,7 @@ async def join_voice_channel():
 async def on_ready():
     log.info(f"✅ تم تسجيل الدخول باسم {client.user}")
     bot_status["user"] = str(client.user)
-    client.loop.create_task(join_voice_channel())
+    asyncio.ensure_future(join_voice_channel())
 
 
 @client.event
